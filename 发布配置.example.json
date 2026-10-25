@@ -1,0 +1,19 @@
+{
+  "browser_channel": "msedge",
+  "list_url": "https://mcdev.webapp.163.com/#/work/list/pe_component",
+  "max_note_len": 200,
+  "mods": [
+    {
+      "id": "示例模组",
+      "project_dir": "D:/MCModDve/你的项目目录",
+      "resource_keyword": "平台作品名关键字",
+      "name_template": "示例模组 - 共{n}个内容",
+      "count_glob": "示例_behavior_pack/xxx/*.json",
+      "zip_glob": "示例_*.zip",
+      "pack_args": [
+        "-KeepOld"
+      ],
+      "changelog": "更新日志.md"
+    }
+  ]
+}
