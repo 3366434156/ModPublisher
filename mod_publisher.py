@@ -122,10 +122,6 @@ class Host(object):
             self._ready.set()
             return
         self._ready.set()
-        try:
-            self.eng._ctx.on("close", lambda _c: self._closed.set())
-        except Exception:
-            pass
         while not self._closed.is_set():
             try:
                 fn, ev, box = self._q.get_nowait()
@@ -173,13 +169,28 @@ class Host(object):
 
     # ---------- 引擎 ----------
     def ensure(self):
-        if self.eng:
-            return self.eng
-        self.eng = core.BrowserEngine(self.cfg, lambda k, p: None)
+        """确保引擎与浏览器可用；窗口被关/崩溃后自动重开（配合 --reside 常驻）。"""
+        if self.eng and self.eng._ctx is not None:
+            try:
+                if not self.eng._ctx.is_closed():
+                    return self.eng
+            except Exception:
+                pass
+            print("[引擎] 浏览器窗口已丢失，自动重开…", flush=True)
+            self.eng._ctx = None
+            self.eng.page = None
+            self.eng._editor_mod = None
+        if self.eng is None:
+            self.eng = core.BrowserEngine(self.cfg, lambda k, p: None)
         self.eng._ensure_browser()
         ctx = self.eng._ctx
         # 绑定与注入都放到 context 级：随页面导航持续生效
         ctx.expose_binding("__pyRequest", self._on_request)
+        try:
+            ctx.on("close", lambda _c: print(
+                "[引擎] 浏览器窗口已关闭；下次接口调用自动重开", flush=True))
+        except Exception:
+            pass
         # 停靠页：常驻平台域，API 全部经它 fetch（浏览器原生管理轮换cookie）
         self.api_page = ctx.new_page()
         try:
@@ -687,6 +698,21 @@ class Host(object):
             return {"updated": sorted(changes)}
         return self.submit(job)
 
+    def h_set_pc(self, name, html):
+        """PC 详情信息 = sync_item_info.info（平台与 PE 详情是两份独立富文本）。"""
+        rid = self._rid(name)
+
+        def job():
+            detail = self.api.detail(rid)
+            si = detail.get("sync_item_info")
+            si = dict(si) if isinstance(si, dict) else {}
+            si["info"] = html
+            detail["sync_item_info"] = si
+            body = PA.build_update_body(detail, {"sync_item_info": si})
+            self.api.update_item(rid, body)
+            return {"pc_len": len(html), "pc_imgs": html.count("<img")}
+        return self.submit(job)
+
     def h_add_image(self, name, img_path, mime=None):
         img = Path(img_path)
         mime = mime or ("image/png" if img.suffix.lower() == ".png" else "image/jpeg")
@@ -756,6 +782,8 @@ class Host(object):
                     ln = int(self.headers.get("Content-Length") or 0)
                     payload = json.loads(self.rfile.read(ln) or b"{}")
                     cmd = self.path.strip("/")
+                    # 自愈：浏览器窗口没了就先重开（引擎存活时是廉价检查）
+                    host.submit(lambda: host.ensure(), timeout=120)
 
                     def boot():
                         return host.rpc_boot({})
@@ -780,6 +808,21 @@ class Host(object):
                     elif cmd == "submit":
                         self._send({"ok": True, "data": host.h_submit(
                             payload["name"], payload.get("note") or "")})
+                    elif cmd == "set-pc":
+                        self._send({"ok": True, "data": host.h_set_pc(
+                            payload["name"], payload["html"])})
+                    elif cmd == "open":
+                        def _open():
+                            r = host.rpc_open_official(payload)
+                            try:  # 把新开的官方编辑页带到前台
+                                cands = [pg2 for pg2 in host.eng._ctx.pages
+                                         if "mcdev.webapp.163.com" in (pg2.url or "")]
+                                if cands:
+                                    cands[-1].bring_to_front()
+                            except Exception:
+                                pass
+                            return r
+                        self._send({"ok": True, "data": host.submit(_open)})
                     else:
                         self._send({"ok": False, "error": "未知命令 " + cmd}, 404)
                 except Exception as e:
@@ -961,6 +1004,15 @@ def main():
         host.js_log("[Agent API] http://127.0.0.1:%d （list/read/set/add-image/publish/submit）" % port)
     except Exception as e:
         host.js_log("[Agent API] 启动失败: %s" % e)
+    if "--reside" in sys.argv:
+        # 常驻模式（Agent 用）：窗口关闭不退出进程，HTTP API 常驻，
+        # 下次接口调用自动重开浏览器窗口。Ctrl+C 退出。
+        try:
+            while True:
+                time.sleep(3600)
+        except KeyboardInterrupt:
+            pass
+        os._exit(0)
     # 窗口（Edge 本体）关闭 → 引擎结束 → 进程退出
     host._closed.wait()
     try:

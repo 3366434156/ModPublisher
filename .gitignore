@@ -19,5 +19,14 @@ tests/_packtest/
 tests/_c.js
 tests/ui_*.png
 tests/ui_*.jpg
-tests/profile_copy/
+tests/profile*/
 *.log
+
+# ---- 运行产物/大文件（勿入库） ----
+# 本地工具会话面板
+.dsh-ops/
+# 带登录态的 Edge profile、发布用生成图片（100MB+）
+tests/pubimgs/
+# 实时数据导出：线上详情备份/HTML转储、发布结果回执
+tests/live_detail_*
+tests/publish_result.json

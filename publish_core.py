@@ -187,7 +187,9 @@ class BrowserEngine(object):
             str(PROFILE_DIR), channel=self.cfg.get("browser_channel", "msedge"),
             headless=bool(self.cfg.get("headless_browser", False)),
             viewport={"width": 1440, "height": 960},
-            args=["--window-position=20,20", "--window-size=1360,1000"],
+            args=["--window-position=20,20", "--window-size=1360,1000",
+                  # 固定调试端口：测试/Agent 脚本一律附加到这个已打开的 Edge，不另开浏览器
+                  "--remote-debugging-port=9222"],
         )
         self.page = self._ctx.pages[0] if self._ctx.pages else self._ctx.new_page()
         self.emit("browser_up", None)

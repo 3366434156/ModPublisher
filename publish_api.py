@@ -59,13 +59,22 @@ class Api(object):
             import urllib.parse as _up
             qs = _up.urlencode(params)
             url = url + ("&" if "?" in url else "?") + qs
+        headers = {"Accept": "application/json, text/plain, */*"}
+        if data is not None:
+            headers["Content-Type"] = "application/json"  # 缺失时服务端解析body为空
         if self._page is not None:
-            r = self._page.evaluate(self._FETCH_JS, [method, url, data])
+            r = self._page.evaluate(
+                "async ([method, url, body, headers]) => {"
+                "const opt = {method: method, credentials: 'include', headers: headers};"
+                "if (body !== null) opt.body = body;"
+                "const r = await fetch(url, opt);"
+                "return {status: r.status, text: await r.text()};}",
+                [method, url, data, headers])
             status, body = r["status"], r["text"]
         else:
-            rr = self._ctx.request.fetch(url, method=method, data=data,
-                                         headers={"Accept": "application/json"},
-                                         fail_on_status_code=False, timeout=timeout)
+            rr = self._ctx.request.fetch(
+                url, method=method, data=data, headers=headers,
+                fail_on_status_code=False, timeout=timeout)
             status, body = rr.status, rr.text()
         try:
             j = json.loads(body)
@@ -75,6 +84,12 @@ class Api(object):
             raise ApiError("HTTP %s: %s" % (status, body[:200]))
         if _no_login(j):
             raise ApiError("API会话未登录")
+        st = j.get("status")
+        if st not in (None, "ok", 200, 0):
+            errs = j.get("errors")
+            detail = (" " + json.dumps(errs, ensure_ascii=False)) if errs else ""
+            raise ApiError("接口错误 status=%s msg=%s%s"
+                           % (st, j.get("msg") or j.get("message"), detail))
         code = j.get("code")
         if code not in (200, 0, None):
             raise ApiError("code=%s msg=%s" % (code, j.get("msg") or j.get("message")))
@@ -260,7 +275,10 @@ def build_update_body(detail, changes=None):
         b["play_plan_expire_time"] = None
         b["play_plan_expire_month"] = 0
     else:
-        b["play_plan_expire_month"] = None
+        # 未过期（含永久=-1）：原值透传；month 缺省补 0（发 null 报"有效期不能为空"）
+        b["play_plan_expire_month"] = detail.get("play_plan_expire_month")
+        if b["play_plan_expire_month"] is None:
+            b["play_plan_expire_month"] = 0
     if not detail.get("sync_pc_flag"):
         b.pop("sync_item_info", None)
     else:
@@ -268,6 +286,31 @@ def build_update_body(detail, changes=None):
     b["dyeing"] = src("dyeing") or ""
     b["activity_desc"] = src("activity_desc") or ""
     b["pe_game_introduction"] = src("pe_game_introduction") or ""
+
+    # —— 边角字段矫正（实测 update 校验要求，端点同 McDevManager DTO）——
+    # corp_proof_image：非原创/无证明时平台要求不发该键（空串=URL格式错误）
+    if not b.get("corp_proof_image"):
+        b.pop("corp_proof_image", None)
+    # dlc_info：null 子字段 → 空容器
+    dlc = b.get("dlc_info")
+    dlc = _to_obj(dlc)
+    if dlc.get("master") is None:
+        dlc["master"] = {}
+    if dlc.get("slave_list") is None:
+        dlc["slave_list"] = []
+    b["dlc_info"] = dlc
+    # 副作用类型：null → 0（平台校验非空）
+    if b.get("pri_effect_type") is None:
+        b["pri_effect_type"] = 0
+    if b.get("sub_effect_type") is None:
+        b["sub_effect_type"] = 0
+    # subject_id：空串属"数据格式错误" → JsonNull
+    if b.get("subject_id") in ("", None):
+        b["subject_id"] = None
+    # openbeta/commercial：null 透传即可，"" → None
+    for tk in ("openbeta_time", "commercial_time"):
+        if b.get(tk) == "":
+            b[tk] = None
 
     for k in ("item_name", "update_summary", "current_change_log",
               "activity_desc", "pe_game_introduction", "info"):

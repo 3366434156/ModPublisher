@@ -98,6 +98,10 @@ py -3 -m PyInstaller --onefile --windowed --name 网易模组发布器 ^
 | `publish_core.py` | 浏览器引擎（登录 / 兜底自动化） |
 | `tests/e2e_v12.py` | 真会话端到端回归 |
 | `tests/serve_once.py` | 无头常驻实例（调试 Agent API 用） |
+| `tests/do_publish.py` | 趣味附魔发布脚本；`--dry-run` 只读自检详情配方（字数/图数），不带则真实发布 |
+| `tests/probe_detail_state.py` | 只读探针：作品级字段 + 详情段结构/字数，导出 `live_detail_dump.html` |
+| `tests/test_detail_recipe.py` | 离线单测：详情组装配方（历史标题剥离、幂等） |
+| `tests/gen_detail_images.py` | 详情长图素材生成（附魔介绍瀑布流、更新日志紧凑渲染） |
 
 ## 端点与实现备忘
 
@@ -106,6 +110,8 @@ py -3 -m PyInstaller --onefile --windowed --name 网易模组发布器 ^
   `fp.ps.netease.com` multipart 直传 → 响应 JSON + `x-ntes-signature` 头
 - update 请求体 = detail 原样透传 + 字段矫正（mc_version 字符串转数组等）
 - 提升版本 = `res[0].add_version`
+- 详情字数：编辑器按 Quill 长度计（**图片占 1 字**），PE 详情上限≈405-420 字、图片≤10 张；
+  超字数静默截断（吞图不报错），超图数报错；富文本白名单 `p/strong/span/br/img`（`<b>` 报非法字符）
 - 鉴权为轮换票据：所有请求经常驻平台域的停靠页 `fetch` 发出，
   由浏览器原生管理 cookie 轮换（静态导出 cookie 会被轮换挤掉失效）
 
